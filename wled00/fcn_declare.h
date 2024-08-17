@@ -132,7 +132,7 @@ void decodeIR44(uint32_t code);
 void decodeIR21(uint32_t code);
 void decodeIR6(uint32_t code);
 void decodeIR9(uint32_t code);
-void decodeIRJson(uint32_t code);
+void decodeIRJson(uint32_t code, bool longPress);
 
 void initIR();
 void handleIR();

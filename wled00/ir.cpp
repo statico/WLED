@@ -16,6 +16,9 @@ IRrecv* irrecv;
 decode_results results;
 
 unsigned long irCheckedTime = 0;
+unsigned long pressStartTime = 0;
+bool firedLongPress = false;
+uint32_t initialCode = 0;
 uint32_t lastValidCode = 0;
 byte lastRepeatableAction = ACTION_NONE;
 uint8_t lastRepeatableValue = 0;
@@ -261,20 +264,37 @@ void changeWhite(int8_t amount, int16_t cct=-1)
 
 void decodeIR(uint32_t code)
 {
+  bool longPress = false;
   if (code == 0xFFFFFFFF) {
-    //repeated code, continue brightness up/down
-    irTimesRepeated++;
-    applyRepeatActions();
-    return;
+    // check for long press commands
+    if (!firedLongPress && pressStartTime > 0 && (millis() - pressStartTime) > 2000) {
+      firedLongPress = true;
+      longPress = true;
+    } else {
+      // repeated code, continue brightness up/down
+      irTimesRepeated++;
+      applyRepeatActions();
+      return;
+    }
+  } else {
+    // not a repeat
+    pressStartTime = millis();
+    firedLongPress = false;
   }
   lastValidCode = 0; irTimesRepeated = 0;
   lastRepeatableAction = ACTION_NONE;
-
+  
   if (irEnabled == 8) { // any remote configurable with ir.json file
-    decodeIRJson(code);
+    if (longPress) {
+      decodeIRJson(initialCode, true);
+    } else {
+      initialCode = code; // save it for long press
+      decodeIRJson(code, false);
+    }
     stateUpdated(CALL_MODE_BUTTON);
     return;
   }
+
   if (code > 0xFFFFFF) return; //invalid code
 
   switch (irEnabled) {
@@ -300,7 +320,7 @@ void decodeIR(uint32_t code)
 void applyRepeatActions()
 {
   if (irEnabled == 8) {
-    decodeIRJson(lastValidCode);
+    decodeIRJson(lastValidCode, false);
     return;
   } else switch (lastRepeatableAction) {
     case ACTION_BRIGHT_UP :      incBrightness();                            stateUpdated(CALL_MODE_BUTTON); return;
@@ -614,7 +634,8 @@ different labels or colors. Once you edit the ir.json file, upload it to your co
 using the /edit page.
 
 Each key should be the hex encoded IR code. The "cmd" property should be the HTTP API
-or JSON API command to execute on button press. If the command contains a relative change (SI=~16),
+or JSON API command to execute on button press. The "longCmd" like "cmd" but executed on a
+long button press (2s). If the command contains a relative change (SI=~16),
 it will register as a repeatable command. If the command doesn't contain a "~" but is repeatable, add "rpt" property
 set to true. Other properties are ignored but having labels and positions can assist with editing
 the json file.
@@ -628,7 +649,7 @@ Sample:
                "label": "Preset 1, fallback to Saw - Party if not found"},
 }
 */
-void decodeIRJson(uint32_t code)
+void decodeIRJson(uint32_t code, bool longPress)
 {
   char objKey[10];
   String cmdStr;
@@ -653,8 +674,9 @@ void decodeIRJson(uint32_t code)
     return;
   }
 
-  cmdStr = fdo["cmd"].as<String>();
-  jsonCmdObj = fdo["cmd"]; //object
+  cmdStr = fdo[longPress ? "longCmd" : "cmd"].as<String>();
+  jsonCmdObj = fdo[longPress ? "longCmd" : "cmd"]; //object
+  Serial.printf("cmdStr=%s\n", cmdStr.c_str());
 
   if (jsonCmdObj.isNull())  // we could also use: fdo["cmd"].is<String>()
   {
